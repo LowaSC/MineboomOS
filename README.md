@@ -51,9 +51,9 @@ Runtime state is stored under `/data` and is not replaced by OTA updates.
 
 System applications ship with the OS under `os/apps`. Games, Factory, Storage
 and other user applications will live in a separate `MineboomApps` repository
-and are installed through the Apps system application. This alpha does not yet
-provide that public catalog, so an empty Store view is expected until a source
-is configured in Settings > Connections.
+and are installed through the Apps system application. The distribution points
+to its public alpha catalog by default. A different source can be configured in
+Settings > Connections.
 
 ## Development
 

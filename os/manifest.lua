@@ -128,7 +128,7 @@ return {
             -- stable = "https://raw.githubusercontent.com/LowaSC/MineboomOS/stable/os",
         },
         -- User applications are distributed independently from the OS.
-        appStore = nil,
+        appStore = "https://raw.githubusercontent.com/LowaSC/MineboomApps/main",
     },
 
     core      = core,
