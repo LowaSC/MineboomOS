@@ -13,6 +13,9 @@ local STAGING      = "/.os_install"
 local HTTP_TIMEOUT = 10
 
 local CHANNELS = {
+    -- Enable after the first portable stable release is published:
+    -- {name = "stable", url = "https://raw.githubusercontent.com/LowaSC/MineboomOS/stable/os", note = "tested release"},
+    {name = "stable", note = "not published yet", disabled = true},
     {name = "dev", url = "https://raw.githubusercontent.com/LowaSC/MineboomOS/dev/os", note = "current development"},
 }
 
@@ -143,20 +146,25 @@ local function chooseChannel()
     end
     choices[#choices + 1] = {name = "Enter download URL"}
     for i, ch in ipairs(CHANNELS) do
-        choices[#choices + 1] = {name = ch.name .. ": " .. ch.note, url = ch.url}
+        choices[#choices + 1] = {name = ch.name .. ": " .. ch.note, url = ch.url, disabled = ch.disabled}
     end
     print("Where to install from:")
     for i, ch in ipairs(choices) do print("  " .. i .. ") " .. ch.name) end
-    print("Stable is not published yet.")
+    print("Stable is visible but disabled until release.")
     print("")
     while true do
         local pick = tonumber(ask("Select [1]: ", "1"))
         if pick and choices[pick] then
-            if choices[pick].url then return choices[pick].url end
-            local url = ask("Download URL (blank cancels): ", "")
-            if url == "" then return nil end
-            if url:match("^https?://%S+$") then return url end
-            print("Enter an http:// or https:// URL.")
+            if choices[pick].disabled then
+                print("That channel is not published yet.")
+            elseif choices[pick].url then
+                return choices[pick].url
+            else
+                local url = ask("Download URL (blank cancels): ", "")
+                if url == "" then return nil end
+                if url:match("^https?://%S+$") then return url end
+                print("Enter an http:// or https:// URL.")
+            end
         else
             print("Choose one of the listed options.")
         end
