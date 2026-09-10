@@ -1,0 +1,9 @@
+*.db
+*.log
+/.os_install/
+/.os_tmp/
+/os-stable/
+/.mineboom_source
+/.mineboom_manifest
+/.mineboom_role
+/.appstore_source
