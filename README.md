@@ -1,13 +1,21 @@
 # MineboomOS
 
+> [!CAUTION]
+> **EARLY ALPHA — NOT READY FOR NORMAL PLAY.** MineboomOS is under active
+> development. Installation, updates, networking, shared accounts and
+> applications may be incomplete or break without migration. It currently
+> targets the maintainer's test environment and is not expected to work
+> correctly on other Minecraft servers. Use only on disposable test computers
+> and keep backups of every world and ComputerCraft data directory.
+
 MineboomOS is a desktop and server-role operating system for
-[CC:Tweaked](https://tweaked.cc/). The current private preview targets
+[CC:Tweaked](https://tweaked.cc/). The current alpha targets
 Minecraft 1.21.1, NeoForge and CC:Tweaked 1.120.2.
 
-## Status
+## Alpha installation
 
-This repository is private while installation, updates and shared accounts are
-being tested. The `dev` branch contains the current portable test build.
+The `dev` branch contains the current experimental build. There is no portable
+stable channel yet.
 
 MineboomOS 1.0.6 Obsidian remains the stable release for the maintainer's
 existing world. It is not exported here as a portable `stable` branch because
@@ -15,13 +23,15 @@ it predates standalone profiles and contains assumptions about that world's
 registry and service IDs. The first portable stable branch will be promoted
 after dev.45 passes the in-game checklist.
 
-## Install during private testing
+On a disposable CC:Tweaked computer, run:
 
-GitHub does not serve private Raw files anonymously, so the permanent one-line
-`wget run` command is not available yet. During private testing, deliver
-`install.lua` through an authenticated proxy or copy it to the computer from a
-trusted development host. Do not commit a GitHub access token to this repository
-or paste it into a shared computer.
+```text
+wget run https://raw.githubusercontent.com/LowaSC/MineboomOS/main/install.lua
+```
+
+The installer currently offers the `dev` channel only. Its menus and first-run
+setup are unfinished and require keyboard input. Do not install this over an
+important computer without backing up its directory first.
 
 On first boot MineboomOS asks for the device name and creates a local recovery
 owner. Settings > Connections configures update channels, an application source
@@ -39,9 +49,11 @@ Runtime state is stored under `/data` and is not replaced by OTA updates.
 
 ## Applications
 
-System applications ship with the OS under `os/apps`. User applications are
-distributed separately through the Apps system application. The private preview
-does not bundle the maintainer's world-specific application catalog.
+System applications ship with the OS under `os/apps`. Games, Factory, Storage
+and other user applications will live in a separate `MineboomApps` repository
+and are installed through the Apps system application. This alpha does not yet
+provide that public catalog, so an empty Store view is expected until a source
+is configured in Settings > Connections.
 
 ## Development
 

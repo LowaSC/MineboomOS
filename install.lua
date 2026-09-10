@@ -13,7 +13,6 @@ local STAGING      = "/.os_install"
 local HTTP_TIMEOUT = 10
 
 local CHANNELS = {
-    {name = "stable", url = "https://raw.githubusercontent.com/LowaSC/MineboomOS/stable/os", note = "tested release"},
     {name = "dev", url = "https://raw.githubusercontent.com/LowaSC/MineboomOS/dev/os", note = "current development"},
 }
 
@@ -126,6 +125,7 @@ local function header()
     term.setCursorPos(1, 1)
     if term.isColor and term.isColor() then term.setTextColor(colors.yellow) end
     print("MineboomOS installer")
+    print("EARLY ALPHA - TEST COMPUTERS ONLY")
     if term.isColor and term.isColor() then term.setTextColor(colors.white) end
     print("")
 end
@@ -147,7 +147,7 @@ local function chooseChannel()
     end
     print("Where to install from:")
     for i, ch in ipairs(choices) do print("  " .. i .. ") " .. ch.name) end
-    print("Private GitHub channels require authenticated HTTP access.")
+    print("Stable is not published yet.")
     print("")
     while true do
         local pick = tonumber(ask("Select [1]: ", "1"))

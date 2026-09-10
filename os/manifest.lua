@@ -125,7 +125,6 @@ return {
     distribution = {
         channels = {
             dev = "https://raw.githubusercontent.com/LowaSC/MineboomOS/dev/os",
-            stable = "https://raw.githubusercontent.com/LowaSC/MineboomOS/stable/os",
         },
         -- User applications are distributed independently from the OS.
         appStore = nil,
