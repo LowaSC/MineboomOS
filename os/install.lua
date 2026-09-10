@@ -141,19 +141,21 @@ local function chooseChannel()
         if saved then saved = saved:gsub("%s+$", "") end
     end
     local choices = {}
+    local defaultPick = 1
     if saved and saved:match("^https?://") then
         choices[#choices + 1] = {name = "Current source", url = saved}
     end
-    choices[#choices + 1] = {name = "Enter download URL"}
     for i, ch in ipairs(CHANNELS) do
         choices[#choices + 1] = {name = ch.name .. ": " .. ch.note, url = ch.url, disabled = ch.disabled}
     end
+    choices[#choices + 1] = {name = "Enter download URL"}
+    if not saved then defaultPick = 2 end -- Stable is shown first but disabled.
     print("Where to install from:")
     for i, ch in ipairs(choices) do print("  " .. i .. ") " .. ch.name) end
     print("Stable is visible but disabled until release.")
     print("")
     while true do
-        local pick = tonumber(ask("Select [1]: ", "1"))
+        local pick = tonumber(ask("Select [" .. defaultPick .. "]: ", tostring(defaultPick)))
         if pick and choices[pick] then
             if choices[pick].disabled then
                 print("That channel is not published yet.")
