@@ -21,7 +21,7 @@ MineboomOS 1.0.6 Obsidian remains the stable release for the maintainer's
 existing world. It is not exported here as a portable `stable` branch because
 it predates standalone profiles and contains assumptions about that world's
 registry and service IDs. The first portable `stable` branch will be created
-from `main` after dev.45 passes the in-game checklist.
+from `main` after the current dev build passes the in-game checklist.
 
 On a disposable CC:Tweaked computer, run:
 
@@ -57,8 +57,11 @@ Settings > Connections.
 
 ## Development
 
-All code is Lua 5.1 compatible. There is no runtime test environment outside
-Minecraft. Run `luac -p` on every changed Lua file before committing.
+All code is Lua 5.1 compatible. Run `luac -p` on every changed Lua file before
+committing. `tests/run.py` (needs `pip install lupa`) runs the OTA updater and
+the installer on a mock CC:Tweaked filesystem, interrupting them at every file
+operation and checking that the machine always boots into one complete
+release. Everything else is verified in Minecraft.
 
 Development flow:
 

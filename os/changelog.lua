@@ -7,9 +7,11 @@ return {
     --@DEV_START
     {
         version = "dev",
-        date    = "2026-09-10",
+        date    = "2026-09-11",
         channel = "dev",
         changes = {
+            "Lock screen: unlocking now requires the current user's PIN (on-screen keypad, digit keys, Enter/Space to confirm, Backspace to erase); open apps survive the unlock. A Logout button or five wrong attempts end the session and return to the login screen. Tapping the screen no longer reveals the desktop",
+            "Updater: OS files are now replaced as one recoverable transaction (os/lib/ostx.lua). Staged Lua files are syntax-checked before anything is touched, every replaced file is backed up to /.os_bak and the set is recorded in /.os_journal; startup.lua and boot.lua finish or roll back an interrupted update on the next boot, so /os never stays a mix of two versions. The installer commits through the same library, only changed files are staged, and FsUtil.atomicWrite keeps the previous file until the new one is in place and repairs an interrupted write on the next read (dev.46)",
             "Distribution: the separate dev branch is gone; the dev update channel and the installer now follow main, so PRs merged into main reach OTA clients immediately. Machines installed before this change keep the old dev URL in /.mineboom_source and must switch the source in Settings > Connections or be reinstalled",
             "Fixes: App Store channel toggle hit zone was off by one column; Logs no longer duplicates entries on every open and unsubscribes its listener on close; log lines now carry the source in brackets so a message's first word is not parsed as its source; Admin could delete a user by clicking the header row while scrolled; HTTP timeout is now passed in the table form CC:Tweaked actually honours; auto-lock timer is reset only by user input, not by rednet/http/timer events; app ids from the store are validated before being written to /os/apps and Admin accepts the store catalog only from the configured store computer",
             "Connections: distributions now describe their app catalog and dev/stable URLs so standalone installs can browse apps and switch update channels; added an admin Connections screen, optional service discovery and explicit shared-account server selection with separate sessions/cache/data and local-owner recovery. Older releases without standalone/connection support are blocked before installation (dev.45)",

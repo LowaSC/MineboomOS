@@ -38,6 +38,7 @@ local function validField(key, value)
 end
 
 function Connections.load()
+    FsUtil.repair(Connections.PATH)
     if not fs.exists(Connections.PATH) then
         if fs.exists(Connections.PATH .. ".tmp") or fs.exists(Connections.PATH .. ".bak") then
             return nil, "Restore interrupted connections settings from backup"

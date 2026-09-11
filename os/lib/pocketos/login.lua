@@ -84,13 +84,19 @@ local function geom(W, AH)
     }
 end
 
-local function drawKeypad(screen, g, theme)
+-- Ширина и высота клавиатуры в символах: их используют и логин, и экран
+-- блокировки, чтобы разместить её на своей раскладке.
+Login.KEYPAD_W = 3 * (BTN_W + 1) - 1
+Login.KEYPAD_H = #KEYPAD * (BTN_H + 1) - 1
+
+-- Рисует клавиатуру с левым верхним углом (kpadX, kpadY).
+function Login.drawKeypad(screen, kpadX, kpadY, theme)
+    theme = theme or {}
     local ac = theme.accentBg or colors.cyan
-    local bg = theme.pageBg   or colors.black
     for row, keys in ipairs(KEYPAD) do
-        local y = g.kpadY + (row - 1) * (BTN_H + 1)
+        local y = kpadY + (row - 1) * (BTN_H + 1)
         for col, k in ipairs(keys) do
-            local x = g.kpadX + (col - 1) * (BTN_W + 1)
+            local x = kpadX + (col - 1) * (BTN_W + 1)
             local kbg = (k == "OK") and colors.green
                      or (k == "X")  and colors.red
                      or ac
@@ -102,6 +108,28 @@ local function drawKeypad(screen, g, theme)
             screen.write(padC(tostring(k), BTN_W))
         end
     end
+end
+
+-- Hit-тест клавиатуры: ("digit", n) / "backspace" / "ok" / nil.
+function Login.keypadHit(x, y, kpadX, kpadY)
+    for row, keys in ipairs(KEYPAD) do
+        local ky = kpadY + (row - 1) * (BTN_H + 1)
+        if y == ky then
+            for col, k in ipairs(keys) do
+                local kx = kpadX + (col - 1) * (BTN_W + 1)
+                if x >= kx and x < kx + BTN_W then
+                    if k == "X"  then return "backspace" end
+                    if k == "OK" then return "ok" end
+                    return "digit", k
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function drawKeypad(screen, g, theme)
+    Login.drawKeypad(screen, g.kpadX, g.kpadY, theme)
 end
 
 function Login.render(screen, W, AH, state, theme)
@@ -316,21 +344,7 @@ function Login.hit(x, y, W, AH, state)
     end
 
     -- Клавиатура
-    for row, keys in ipairs(KEYPAD) do
-        local ky = g.kpadY + (row - 1) * (BTN_H + 1)
-        if y == ky then
-            for col, k in ipairs(keys) do
-                local kx = g.kpadX + (col - 1) * (BTN_W + 1)
-                if x >= kx and x < kx + BTN_W then
-                    if k == "X"  then return "backspace" end
-                    if k == "OK" then return "ok" end
-                    return "digit", k
-                end
-            end
-        end
-    end
-
-    return nil
+    return Login.keypadHit(x, y, g.kpadX, g.kpadY)
 end
 
 return Login
