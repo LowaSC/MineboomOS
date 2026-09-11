@@ -161,6 +161,11 @@ local function hasDevChannel(app)
     return app.devVersion ~= nil
 end
 
+-- id приложения становится именем файла в /os/apps — никаких слэшей и «..».
+local function validAppId(id)
+    return type(id) == "string" and id ~= "" and string.match(id, "^[%w_%-]+$") ~= nil
+end
+
 local function appPath(id)
     return APPS_DIR .. "/" .. id .. ".lua"
 end
@@ -446,6 +451,10 @@ local function onAppReceived(st, msg)
     end
     local id   = msg.id
     local code = msg.code
+    if not validAppId(id) then
+        st.storeStatus = "Error: bad app id " .. tostring(id)
+        return
+    end
     if type(code) ~= "string" or #code == 0 then
         st.storeStatus = "Error: " .. (msg.error or ("empty code for " .. id))
         return
@@ -932,7 +941,9 @@ function M.onEvent(st, event, p1, p2, p3, p4)
                     local contentW = W2 - 1
                     local hasDev = hasDevChannel(app)
                     -- Channel toggle: rightmost 3 chars before status badge (only if dev exists)
-                    local chStart = contentW - 5 - 3 + 1  -- 6-badge + 3-ch
+                    -- Бейдж статуса занимает 6 колонок, переключатель канала — 3
+                    -- перед ним (см. drawStoreApp).
+                    local chStart = contentW - 6 - 3 + 1
                     if hasDev and x >= chStart and x <= chStart + 2 then
                         local cur = appEffectiveChannel(app.id, st.channelOverrides, st.globalChannel)
                         st.channelOverrides[app.id] = (cur == "dev") and "stable" or "dev"

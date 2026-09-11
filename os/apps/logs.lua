@@ -106,8 +106,15 @@ function M.init(win, ctx)
             thumbFg = colors.black,
         }),
     }
-    Log.subscribe(function() st.autoscroll = true end)
+    st.listener = Log.subscribe(function() st.autoscroll = true end)
     return st
+end
+
+function M.onClose(st)
+    if st and st.listener then
+        Log.unsubscribe(st.listener)
+        st.listener = nil
+    end
 end
 
 -- ── draw ─────────────────────────────────────────────────────────────────────
