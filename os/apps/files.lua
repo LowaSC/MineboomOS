@@ -8,7 +8,7 @@ M.name     = "Files"
 M.icon     = "Fi"
 M.iconBg   = colors.blue
 M.iconFg   = colors.white
-M.version  = 4
+M.version  = 5
 M.system   = true
 M.category = "system"
 
@@ -53,6 +53,62 @@ local function absPath(base, name)
     return "/" .. p
 end
 
+-- ── Границы доступа ──────────────────────────────────────────────────────────
+-- Обычный пользователь видит только свою папку данных (ctx.dataRoot) и не
+-- может подняться выше. Администратор видит всё, но каталоги и файлы, которыми
+-- управляет сама ОС, из Files менять нельзя никому: их правит установщик и
+-- OTA, а случайное удаление делает машину незагружаемой.
+
+local SYSTEM_PATHS = {"/os", "/startup.lua", "/data/system", "/rom"}
+
+local function isSystemPath(path)
+    for _, sys in ipairs(SYSTEM_PATHS) do
+        if path == sys or string.sub(path, 1, #sys + 1) == sys .. "/" then return true end
+    end
+    -- Служебные файлы в корне: /.mineboom_source, /.os_journal и т.п.
+    if string.match(path, "^/%.[^/]+$") then return true end
+    return false
+end
+
+local function within(root, path)
+    if root == "/" then return true end
+    return path == root or string.sub(path, 1, #root + 1) == root .. "/"
+end
+
+local function isAdmin(st)
+    local u = st.ctx and st.ctx.currentUser
+    return u and u.isAdmin or false
+end
+
+-- Имя новой записи: без разделителей и переходов вверх, иначе через New/Rename
+-- можно было бы выйти за корень или переместить файл в другой каталог.
+local function validName(name)
+    if type(name) ~= "string" or name == "" then return false end
+    if string.find(name, "[/\\\n\r]") then return false end
+    if name == "." or name == ".." then return false end
+    return true
+end
+
+-- Можно ли менять (создавать, переименовывать, удалять) по этому пути.
+-- Возвращает true либо false и причину.
+local function canModify(st, path)
+    if not within(st.root, path) then return false, "Outside your folder" end
+    if isSystemPath(path) then return false, "System files are managed by the OS" end
+    return true
+end
+
+local function canRead(st, path)
+    if not within(st.root, path) then return false, "Outside your folder" end
+    return true
+end
+
+-- Путь для заголовка: своя папка показывается как ~, чтобы влезать в 26 колонок.
+local function displayPath(st, path)
+    if st.root == "/" then return path end
+    if path == st.root then return "~" end
+    return "~" .. string.sub(path, #st.root + 1)
+end
+
 local function shortSize(path)
     if fs.isDir(path) then return "<DIR>" end
     local ok, size = pcall(fs.getSize, path)
@@ -91,12 +147,11 @@ end
 
 local function readDir(st)
     st.entries = {}
-    if st.path ~= "/" then
-        table.insert(st.entries, {name = "..", path = parentDir(st.path), dir = true, up = true})
+    if not within(st.root, st.path) or not fs.exists(st.path) then
+        st.path = st.root
     end
-
-    if not fs.exists(st.path) then
-        st.path = "/"
+    if st.path ~= st.root then
+        table.insert(st.entries, {name = "..", path = parentDir(st.path), dir = true, up = true})
     end
 
     local ok, list = pcall(fs.list, st.path)
@@ -148,6 +203,8 @@ local function ensureVisible(st, win)
 end
 
 local function openFile(st, entry)
+    local okRead, why = canRead(st, entry.path)
+    if not okRead then setStatus(st, why, "error"); return end
     local data, err = fsutil().readFile(entry.path)
     if not data then
         setStatus(st, tostring(err), "error")
@@ -177,6 +234,7 @@ local function enterEntry(st)
     local e = selectedEntry(st)
     if not e then return end
     if e.dir then
+        if not within(st.root, e.path) then setStatus(st, "Outside your folder", "error"); return end
         st.path = e.path
         st.selected = 1
         st.scroll = 0
@@ -206,7 +264,10 @@ local function createFile(st, name)
     if not Users.can(st.ctx.currentUser, "editFiles") then
         setStatus(st, "No permission to create files", "error"); return
     end
+    if not validName(name) then setStatus(st, "Invalid name", "error"); return end
     local path = absPath(st.path, name)
+    local allowed, why = canModify(st, path)
+    if not allowed then setStatus(st, why, "error"); return end
     if fs.exists(path) then setStatus(st, "Already exists: " .. name, "error"); return end
     local ok, err = fsutil().atomicWrite(path, "")
     if ok then
@@ -221,7 +282,10 @@ local function createDir(st, name)
     if not Users.can(st.ctx.currentUser, "editFiles") then
         setStatus(st, "No permission to create folders", "error"); return
     end
+    if not validName(name) then setStatus(st, "Invalid name", "error"); return end
     local path = absPath(st.path, name)
+    local allowed, why = canModify(st, path)
+    if not allowed then setStatus(st, why, "error"); return end
     if fs.exists(path) then setStatus(st, "Already exists: " .. name, "error"); return end
     local ok, err = pcall(fs.makeDir, path)
     if ok then
@@ -238,7 +302,11 @@ local function renameEntry(st, name)
     end
     local e = selectedEntry(st)
     if not e or e.up then return end
+    if not validName(name) then setStatus(st, "Invalid name", "error"); return end
     local dest = absPath(st.path, name)
+    local allowed, why = canModify(st, e.path)
+    if allowed then allowed, why = canModify(st, dest) end
+    if not allowed then setStatus(st, why, "error"); return end
     if fs.exists(dest) then setStatus(st, "Already exists: " .. name, "error"); return end
     local ok, err = pcall(fs.move, e.path, dest)
     if ok then
@@ -255,7 +323,9 @@ local function deleteEntry(st)
     end
     local e = st.confirmTarget
     if not e or e.up then return end
-    if e.path == "/" then setStatus(st, "Cannot delete root", "error"); return end
+    if e.path == "/" or e.path == st.root then setStatus(st, "Cannot delete root", "error"); return end
+    local allowed, why = canModify(st, e.path)
+    if not allowed then setStatus(st, why, "error"); return end
     local ok, err = pcall(fs.delete, e.path)
     if ok then
         setStatus(st, "Deleted: " .. e.name, "success")
@@ -265,11 +335,6 @@ local function deleteEntry(st)
     end
 end
 
-local function isAdmin(st)
-    local u = st.ctx and st.ctx.currentUser
-    return u and u.isAdmin or false
-end
-
 local function runLua(st)
     if not isAdmin(st) then
         setStatus(st, "Only admins can run scripts", "error")
@@ -277,6 +342,8 @@ local function runLua(st)
     end
     local e = selectedEntry(st)
     if not e or e.dir then return end
+    local okRead, why = canRead(st, e.path)
+    if not okRead then setStatus(st, why, "error"); return end
     if string.sub(e.name, -4) ~= ".lua" then
         setStatus(st, "Only .lua files can be run", "error")
         return
@@ -291,10 +358,19 @@ local function runLua(st)
 end
 
 function M.init(win, ctx)
+    local user = ctx and ctx.currentUser
+    local root = "/"
+    if not (user and user.isAdmin) then
+        root = (ctx and ctx.dataRoot) or "/data"
+        if root ~= "/" then root = string.gsub(root, "/+$", "") end
+        if root == "" then root = "/" end
+        pcall(fsutil().ensureDir, root)
+    end
     local st = {
         win = win,
         ctx = ctx,
-        path = "/",
+        root = root,
+        path = root,
         entries = {},
         selected = 1,
         scroll = 0,
@@ -323,7 +399,7 @@ local function drawList(st, win)
     win.clear()
 
     fillLine(win, 1, colors.gray, colors.white)
-    writeAt(win, 1, 1, padR(" FILES  " .. st.path, W), colors.white, colors.gray)
+    writeAt(win, 1, 1, padR(" FILES  " .. displayPath(st, st.path), W), colors.white, colors.gray)
 
     -- Контекстные кнопки: показываем только релевантные для текущего выбора,
     -- чтобы всё помещалось на узком экране карманного компьютера (W=26).
@@ -332,14 +408,18 @@ local function drawList(st, win)
     local hasFile  = hasEntry and not sel.dir
 
     local x = 1
-    x = drawButton(win, st, "up", x, 2, "Up", colors.white, colors.gray)
+    if st.path ~= st.root then
+        x = drawButton(win, st, "up", x, 2, "Up", colors.white, colors.gray)
+    end
     if hasEntry then
         if hasFile and isAdmin(st) then
             x = drawButton(win, st, "run",    x, 2, "Run",    colors.white, colors.blue)
         end
-        x = drawButton(win, st, "rename", x, 2, "Rename", colors.black, colors.yellow)
-        x = drawButton(win, st, "delete", x, 2, "Del",    colors.white, colors.red)
-    else
+        if canModify(st, sel.path) then
+            x = drawButton(win, st, "rename", x, 2, "Rename", colors.black, colors.yellow)
+            x = drawButton(win, st, "delete", x, 2, "Del",    colors.white, colors.red)
+        end
+    elseif canModify(st, st.path == "/" and "/new" or st.path .. "/new") then
         x = drawButton(win, st, "new_file", x, 2, "File", colors.black, colors.lime)
         x = drawButton(win, st, "new_dir",  x, 2, "Dir",  colors.black, colors.cyan)
     end
@@ -472,6 +552,7 @@ end
 
 local function handleAction(st, id)
     if id == "up" then
+        if st.path == st.root then return end
         st.path = parentDir(st.path); st.selected = 1; st.scroll = 0; readDir(st)
     elseif id == "new_file" then
         prompt(st, "file", "New file name", "new.lua")

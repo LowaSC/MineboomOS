@@ -58,7 +58,7 @@ end
 
 local function children(p)
     local out = {}
-    local prefix = p .. "/"
+    local prefix = (p == "") and "" or (p .. "/")
     for path in pairs(vfs.files) do
         if path:sub(1, #prefix) == prefix then out[#out + 1] = path end
     end
@@ -160,13 +160,15 @@ function fs.list(p)
     p = norm(p)
     local out, seen = {}, {}
     for _, c in ipairs(children(p)) do
-        local rel = c:sub(#p + 2)
+        local rel = (p == "") and c or c:sub(#p + 2)
         local first = rel:match("^([^/]+)")
         if first and not seen[first] then seen[first] = true; out[#out + 1] = first end
     end
     return out
 end
 function fs.getFreeSpace() return 10 * 1024 * 1024 end
+function fs.getSize(p) p = norm(p); return vfs.files[p] and #vfs.files[p] or 0 end
+function fs.isReadOnly(p) return norm(p):sub(1, 3) == "rom" end
 
 local function read(p) return vfs.files[norm(p)] end
 local function put(p, data) mkdirs(parentOf(norm(p))); vfs.files[norm(p)] = data end
@@ -220,7 +222,8 @@ G("os", {
 G("term", setmetatable({getSize = function() return 51, 19 end, isColor = function() return true end},
     {__index = function() return function() end end}))
 G("colors", setmetatable({}, {__index = function() return 1 end}))
-G("keys", {leftCtrl = 29, rightCtrl = 157, r = 19, s = 31, q = 16})
+G("keys", {leftCtrl = 29, rightCtrl = 157, r = 19, s = 31, q = 16, n = 49, d = 32, x = 45, y = 21,
+    enter = 28, escape = 1, backspace = 14, up = 200, down = 208, delete = 211, f5 = 63, f9 = 67})
 G("print", function(...) local parts = {} for i = 1, select("#", ...) do parts[i] = tostring(select(i, ...)) end output[#output + 1] = table.concat(parts, "\t") end)
 G("write", function(s) output[#output + 1] = tostring(s) end)
 G("read", function() return "" end)
@@ -525,6 +528,96 @@ do
     check(whichVersion("no-op") == "v1", "no-op update changed files")
     checkClean("no-op")
     print("up-to-date OS                no-op")
+end
+
+-- 8. Files: обычный пользователь заперт в своей папке, системные пути защищены
+do
+    installV1(false)
+    fault.remaining = math.huge
+    put("/data/users/bob/notes.txt", "hi")
+    put("/data/users/alice/secret.txt", "x")
+    put("/data/users.db", "db")
+    local Files = env.dofile("/os/apps/files.lua")
+    local win = {
+        getSize = function() return 26, 20 end,
+        setCursorPos = function() end, write = function() end, clear = function() end,
+        setTextColor = function() end, setBackgroundColor = function() end,
+    }
+    local function press(st, key) Files.onEvent(st, "key", env.keys[key]) end
+    local function typeName(st, value) st.promptValue = value; press(st, "enter") end
+    local function selectPath(st, path)
+        for i, e in ipairs(st.entries) do if e.path == path then st.selected = i; return true end end
+        return false
+    end
+    local function drawOk(st, label)
+        local ok, err = pcall(Files.draw, st, win)
+        check(ok, label .. ": draw crashed: " .. tostring(err))
+    end
+
+    -- обычный пользователь
+    local bob = {currentUser = {id = "bob", name = "Bob", isAdmin = false,
+        permissions = {editFiles = true, deleteFiles = true}}, dataRoot = "/data/users/bob"}
+    local st = Files.init(win, bob)
+    check(st.path == "/data/users/bob", "files: user does not start in own folder: " .. tostring(st.path))
+    check(not st.entries[1] or not st.entries[1].up, "files: '..' shown at user root")
+    drawOk(st, "files user")
+    press(st, "backspace")
+    check(st.path == "/data/users/bob", "files: Backspace left the user root")
+    Files.onEvent(st, "mouse_click", 1, 1, 2) -- клик по месту кнопки Up (её нет)
+    check(st.path == "/data/users/bob", "files: click left the user root")
+
+    press(st, "n"); typeName(st, "../evil.txt")
+    check(not fs.exists("/data/users/evil.txt") and st.statusLevel == "error", "files: created file above root via ..")
+    press(st, "n"); typeName(st, "/os/hack.lua")
+    check(not fs.exists("/os/hack.lua") and st.statusLevel == "error", "files: created file via absolute name")
+    press(st, "d"); typeName(st, "../../pwn")
+    check(not fs.exists("/data/pwn") and not fs.exists("/pwn"), "files: created folder above root")
+    press(st, "n"); typeName(st, "todo.txt")
+    check(fs.exists("/data/users/bob/todo.txt"), "files: cannot create file in own folder")
+
+    check(selectPath(st, "/data/users/bob/notes.txt"), "files: notes.txt not listed")
+    press(st, "r"); typeName(st, "../../notes.txt")
+    check(fs.exists("/data/users/bob/notes.txt") and not fs.exists("/data/notes.txt"), "files: rename escaped root")
+    press(st, "x"); press(st, "y")
+    check(not fs.exists("/data/users/bob/notes.txt"), "files: cannot delete own file")
+
+    -- подсунутый путь в состоянии: readDir возвращает в корень
+    st.path = "/data/users/alice"; press(st, "f5")
+    check(st.path == "/data/users/bob", "files: readDir accepted a path outside root")
+    st.path = "/"; press(st, "f5")
+    check(st.path == "/data/users/bob", "files: readDir accepted /")
+    st.entries = {{name = "secret.txt", path = "/data/users/alice/secret.txt", dir = false}}
+    st.selected = 1; press(st, "enter")
+    check(st.mode ~= "view", "files: opened another user's file")
+
+    -- администратор
+    local admin = {currentUser = {id = "root", name = "Root", isAdmin = true}, dataRoot = "/data/users/root"}
+    st = Files.init(win, admin)
+    check(st.path == "/", "files: admin does not start at /")
+    drawOk(st, "files admin")
+    check(#st.entries > 0, "files: admin sees empty /")
+    st.path = "/os"; press(st, "f5"); drawOk(st, "files admin /os")
+    check(selectPath(st, "/os/boot.lua"), "files: boot.lua not listed for admin")
+    press(st, "x"); press(st, "y")
+    check(fs.exists("/os/boot.lua") and st.statusLevel == "error", "files: admin deleted /os/boot.lua")
+    press(st, "r"); typeName(st, "boot2.lua")
+    check(fs.exists("/os/boot.lua"), "files: admin renamed /os/boot.lua")
+    st.selected = 0; press(st, "n"); typeName(st, "x.lua")
+    check(not fs.exists("/os/x.lua"), "files: admin created file in /os")
+    st.path = "/"; press(st, "f5")
+    check(selectPath(st, "/startup.lua"), "files: startup.lua not listed")
+    press(st, "x"); press(st, "y")
+    check(fs.exists("/startup.lua"), "files: admin deleted /startup.lua")
+    check(selectPath(st, "/.mineboom_source"), "files: marker file not listed")
+    press(st, "x"); press(st, "y")
+    check(fs.exists("/.mineboom_source"), "files: admin deleted /.mineboom_source")
+    st.path = "/data"; press(st, "f5"); st.selected = 0
+    press(st, "n"); typeName(st, "admin.txt")
+    check(fs.exists("/data/admin.txt"), "files: admin cannot create in /data")
+    st.entries = {{name = "secret.txt", path = "/data/users/alice/secret.txt", dir = false}}
+    st.selected = 1; press(st, "enter")
+    check(st.mode == "view", "files: admin cannot read user files")
+    print("Files                        user confined, OS paths protected")
 end
 
 print("manual /os/boot.lua runs (startup.lua migration window): " .. manualBoots)
