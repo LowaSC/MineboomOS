@@ -121,11 +121,20 @@ local function parseLogLine(line)
     local lvl = string.lower(level)
     if LEVEL_RANK[lvl] == nil then lvl = "info" end
     rest = rest or ""
-    -- Источник всегда в квадратных скобках; без них вся строка — сообщение
-    -- (иначе первое слово сообщения принималось бы за источник).
+    -- Новый формат: источник в квадратных скобках. Без них вся строка —
+    -- сообщение (иначе первое слово сообщения принималось бы за источник).
     local source, message = string.match(rest, "^%[([^%]]*)%]%s*(.*)$")
     if not source then
-        source, message = nil, rest
+        -- Старый формат (до dev.46): "source message" без скобок. Источники в
+        -- ОС — только строчные идентификаторы (rednet, updater, app_server, id
+        -- приложений), а сообщения без источника начинаются с заглавной буквы,
+        -- поэтому строчное первое слово считаем источником.
+        local legacySource, legacyMessage = string.match(rest, "^([%l%d_%-]+)%s+(%S.*)$")
+        if legacySource then
+            source, message = legacySource, legacyMessage
+        else
+            source, message = nil, rest
+        end
     end
     return {
         raw     = line,
