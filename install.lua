@@ -1,6 +1,8 @@
 -- Установщик MineboomOS: качает manifest, скачивает файлы во временную зону
--- /.os_install/, после успешной загрузки переносит в /os/. Если что-то сломалось
--- в середине — старая ОС остаётся в живых.
+-- /.os_install/, после успешной загрузки переносит в /os/ через библиотеку
+-- транзакций из того же staging (lib/ostx.lua): журнал, бэкапы и восстановление
+-- при следующей загрузке. Если что-то сломалось в середине — машина грузится
+-- либо со старой ОС, либо с полностью новой.
 --
 --   install.lua                      интерактивно: выбор канала и роли
 --   install.lua <url>                поставить всё с этого адреса, без вопросов
@@ -222,6 +224,19 @@ end
 print("")
 print("Source: " .. baseUrl)
 
+-- Незавершённое обновление или установка: сначала привести /os к одной версии
+-- копией библиотеки транзакций, которую та оставила вне /os.
+if (fs.exists("/.os_journal") or fs.exists("/.os_journal.done")) and fs.exists("/.os_recover.lua") then
+    write("Finishing interrupted update... ")
+    local ok, done, outcome = pcall(function() return dofile("/.os_recover.lua").recover() end)
+    if not ok or not done then
+        print("failed")
+        print("Cannot recover: " .. tostring(ok and outcome or done))
+        return
+    end
+    print(tostring(outcome))
+end
+
 if fs.exists(STAGING) then fs.delete(STAGING) end
 
 -- ── Фаза 1: манифест ──────────────────────────────────────────────────────────
@@ -322,15 +337,64 @@ for index, path in ipairs(files) do
 end
 
 -- ── Фаза 3: переносим в /os (это коммит установки) ────────────────────────────
-print("Installing...")
+-- Одинаковые с живыми файлы в staging не нужны: меньше бэкапов и места на диске.
+local changed = {}
 for _, path in ipairs(files) do
     local rel = string.gsub(path, "^/os/?", "")
-    if not moveOver(STAGING .. "/" .. rel, path) then
-        print("Failed to install " .. path)
-        return
+    local staged = STAGING .. "/" .. rel
+    local handle = fs.exists(path) and fs.open(path, "r")
+    local current = nil
+    if handle then current = handle.readAll(); handle.close() end
+    handle = fs.open(staged, "r")
+    local fresh = nil
+    if handle then fresh = handle.readAll(); handle.close() end
+    if current == fresh then
+        fs.delete(staged)
+    else
+        changed[#changed + 1] = path
     end
 end
-fs.delete(STAGING)
+
+print("Installing " .. #changed .. " changed files...")
+local txPath = STAGING .. "/lib/ostx.lua"
+if #changed == 0 then
+    fs.delete(STAGING)
+elseif fs.exists(txPath) then
+    local okTx, Tx = pcall(dofile, txPath)
+    if not okTx then
+        print("Failed to load " .. txPath .. ": " .. tostring(Tx))
+        fs.delete(STAGING)
+        return
+    end
+    local ok, outcome, why = Tx.commit({staging = STAGING, files = changed, version = manifest.version})
+    if not ok and Tx.pending() then
+        -- Журнал записан, /os могли начать менять: staging и бэкапы не трогать,
+        -- они нужны для восстановления. Пробуем здесь, иначе доделает загрузка.
+        ok, outcome, why = Tx.recover()
+        if not ok then
+            print("Installation interrupted, reboot to recover: " .. tostring(outcome))
+            return
+        end
+    elseif not ok then
+        print("Failed to install: " .. tostring(outcome))
+        fs.delete(STAGING)
+        return
+    end
+    if outcome == "rollback" then
+        print("Installation rolled back: " .. tostring(why))
+        return
+    end
+else
+    -- Релиз без библиотеки транзакций (старше dev.46): пофайловый перенос.
+    for _, path in ipairs(changed) do
+        local rel = string.gsub(path, "^/os/?", "")
+        if not moveOver(STAGING .. "/" .. rel, path) then
+            print("Failed to install " .. path)
+            return
+        end
+    end
+    fs.delete(STAGING)
+end
 
 -- Уборка только после успешной установки: пока новые файлы не на месте,
 -- старые — единственная рабочая ОС.
@@ -371,7 +435,15 @@ if fs.exists("/os/lib/device.lua") then
     end
 end
 
-local startupOk, startupErr = writeFile("/startup.lua", [[
+-- startup.lua ведёт библиотека транзакций (в ней же живёт восстановление);
+-- у релизов без неё остаётся простой запуск boot.lua.
+local startupOk, startupErr
+if fs.exists("/os/lib/ostx.lua") then
+    local okTx, Tx = pcall(dofile, "/os/lib/ostx.lua")
+    if okTx then startupOk, startupErr = Tx.ensureStartup() end
+end
+if startupOk == nil then
+    startupOk, startupErr = writeFile("/startup.lua", [[
 local boot = "/os/boot.lua"
 
 if fs.exists(boot) then
@@ -380,6 +452,7 @@ else
     print("MineboomOS is not installed. Run installer again.")
 end
 ]])
+end
 if not startupOk then print(startupErr); return end
 
 print("Installed " .. tostring(manifest.name) .. " " .. tostring(manifest.version)

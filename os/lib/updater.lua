@@ -1,12 +1,14 @@
 local FsUtil    = dofile("/os/lib/fsutil.lua")
 local Loader    = dofile("/os/lib/loader.lua")
 local HttpFetch = dofile("/os/lib/httpfetch.lua")
+local Tx        = dofile("/os/lib/ostx.lua")
 
 local Updater = {}
 Updater.SOURCE_FILE         = "/.mineboom_source"
 Updater.LOCAL_MANIFEST_FILE = "/.mineboom_manifest"
 Updater.REMOVED_APPS_FILE   = "/data/apps_removed.db"
 Updater.STAGING_PREFIX      = "/.os_tmp"
+Updater.INSTALL_STAGING     = "/.os_install" -- staging установщика, чтобы убрать его хвосты
 Updater.HTTP_TIMEOUT        = 10
 
 local CORE_APPS = {
@@ -127,22 +129,34 @@ function Updater.compatible(manifest)
     return true
 end
 
+-- Хвосты прошлых обновлений. Зовётся только когда журнала нет: незавершённую
+-- транзакцию сначала докатывает Tx.recover(), иначе можно стереть её бэкапы.
 local function clearStaging()
-    if fs.exists(Updater.STAGING_PREFIX) then
-        pcall(fs.delete, Updater.STAGING_PREFIX)
+    for _, path in ipairs({Updater.STAGING_PREFIX, Updater.INSTALL_STAGING, Tx.BACKUP, Tx.RECOVER, Tx.DONE}) do
+        if fs.exists(path) then pcall(fs.delete, path) end
     end
 end
 
 local function stagingPath(target)
-    -- /os/lib/foo.lua -> /.os_tmp/lib/foo.lua  (избегаем коллизий с реальной ОС)
-    local rel = string.gsub(target, "^/os/?", "")
-    return Updater.STAGING_PREFIX .. "/" .. rel
+    return Tx.stagedPath(Updater.STAGING_PREFIX, target)
 end
 
--- Атомарное обновление: сначала скачиваем всё в /.os_tmp/, проверяем, что все
--- файлы получены, затем переносим один за другим (каждый перенос сам атомарен).
--- onProgress(done, total, path) — опциональный колбэк, вызывается перед
--- скачиванием каждого файла (для прогресса в UI). Может быть nil.
+local function writeLocalManifest(manifest, total)
+    FsUtil.atomicWrite(Updater.LOCAL_MANIFEST_FILE, textutils.serialize({
+        name      = manifest.name,
+        channel   = manifest.channel,
+        version   = manifest.version,
+        files     = total,
+        updatedAt = os.epoch and math.floor(os.epoch("utc") / 1000) or math.floor(os.clock()),
+    }))
+end
+
+-- Обновление в две фазы. Фаза 1 скачивает файлы и складывает в /.os_tmp только
+-- те, что отличаются от живых: меньше места на диске и меньше бэкапов. Фаза 2
+-- отдаёт набор Tx.commit(): проверка синтаксиса, журнал, бэкапы, подмена.
+-- Прерывание в любой точке докатывает или откатывает startup.lua/boot.lua при
+-- следующей загрузке — /os никогда не остаётся смесью двух версий.
+-- onProgress(done, total, path) — опциональный колбэк для прогресса в UI.
 function Updater.updateFromHttp(baseUrl, manifest, onProgress, role)
     if not baseUrl or baseUrl == "" then
         return false, "baseUrl is not configured"
@@ -150,13 +164,20 @@ function Updater.updateFromHttp(baseUrl, manifest, onProgress, role)
     local compatible, compatibilityErr = Updater.compatible(manifest)
     if not compatible then return false, compatibilityErr end
 
+    -- Прошлое обновление не завершилось (например, загрузка прошла через старый
+    -- startup.lua): сначала привести /os к одной версии.
+    if Tx.pending() then
+        local ok, outcome = Tx.recover()
+        if not ok then return false, "previous update: " .. tostring(outcome) end
+    end
     clearStaging()
 
     local files = Updater.filesFor(manifest, role)
     local total = #files
     local removed = loadRemovedApps()
 
-    -- Фаза 1: скачать всё в staging
+    -- Фаза 1: скачать всё, отложить в staging только изменившиеся файлы
+    local changed = {}
     for idx, path in ipairs(files) do
         if onProgress then pcall(onProgress, idx, total, path) end
         if removedAppId(path, removed) then
@@ -168,51 +189,47 @@ function Updater.updateFromHttp(baseUrl, manifest, onProgress, role)
                 return false, "fetch " .. path .. ": " .. tostring(err)
             end
 
-            local ok, writeErr = FsUtil.atomicWrite(stagingPath(path), data)
-            if not ok then
-                clearStaging()
-                return false, "stage " .. path .. ": " .. tostring(writeErr)
-            end
-        end
-    end
-
-    -- Фаза 2: перенос staged -> live. Каждый отдельный перенос атомарен
-    -- (FsUtil.atomicWrite пишет в .tmp + move). Сравниваем содержимое, чтобы
-    -- не перезаписывать одинаковые файлы и не порождать лишний flicker.
-    local updated = 0
-    for _, path in ipairs(files) do
-        if not removedAppId(path, removed) then
-            local newData = FsUtil.readFile(stagingPath(path))
-            if newData == nil then
-                clearStaging()
-                return false, "missing staged file " .. path
-            end
-            local current = FsUtil.readFile(path)
-            if current ~= newData then
-                local ok, writeErr = FsUtil.atomicWrite(path, newData)
+            if FsUtil.readFile(path) ~= data then
+                local ok, writeErr = FsUtil.atomicWrite(stagingPath(path), data)
                 if not ok then
                     clearStaging()
-                    return false, "install " .. path .. ": " .. tostring(writeErr)
+                    return false, "stage " .. path .. ": " .. tostring(writeErr)
                 end
-                updated = updated + 1
+                changed[#changed + 1] = path
             end
         end
     end
 
-    clearStaging()
-
-    FsUtil.atomicWrite(Updater.LOCAL_MANIFEST_FILE, textutils.serialize({
-        name      = manifest.name,
-        channel   = manifest.channel,
-        version   = manifest.version,
-        files     = total,
-        updatedAt = os.epoch and math.floor(os.epoch("utc") / 1000) or math.floor(os.clock()),
-    }))
-
-    if updated == 0 then
+    if #changed == 0 then
+        clearStaging()
+        writeLocalManifest(manifest, total)
         return true, "already up to date"
     end
-    return true, "updated " .. updated .. " of " .. total .. " files"
+
+    -- Фаза 2: транзакционная подмена
+    local ok, outcome, why = Tx.commit({
+        staging = Updater.STAGING_PREFIX,
+        files   = changed,
+        version = manifest.version,
+    })
+    if not ok and Tx.pending() then
+        -- Журнал уже записан, значит /os могли начать менять. Ничего не стирать:
+        -- staging и бэкапы нужны для восстановления. Пробуем ещё раз здесь,
+        -- иначе доделает startup.lua при перезагрузке.
+        ok, outcome, why = Tx.recover()
+        if not ok then
+            return false, "install failed, reboot to recover: " .. tostring(outcome)
+        end
+    elseif not ok then
+        clearStaging()
+        return false, "install: " .. tostring(outcome)
+    end
+    if outcome == "rollback" then
+        return false, "update rolled back: " .. tostring(why)
+    end
+
+    writeLocalManifest(manifest, total)
+    return true, "updated " .. #changed .. " of " .. total .. " files"
 end
 
 function Updater.updateConfigured(manifest, cfg, onProgress)

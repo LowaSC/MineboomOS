@@ -18,6 +18,7 @@ local core = {
     "/os/config/computers.lua",
     "/os/lib/loader.lua",
     "/os/lib/fsutil.lua",
+    "/os/lib/ostx.lua",
     "/os/lib/device.lua",
     "/os/lib/first_run.lua",
     "/os/lib/connections.lua",
@@ -116,7 +117,7 @@ for _, name in ipairs(ROLE_ORDER) do append(roles[name]) end
 return {
     name    = "MineboomOS",
     channel = "dev",
-    version = "2026.09.10-dev.45",
+    version = "2026.09.11-dev.46",
     entry   = "/os/boot.lua",
     config  = "/os/config/computers.lua",
     features = {standalone = true, connections = true},

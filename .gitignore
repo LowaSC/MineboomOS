@@ -2,6 +2,10 @@
 *.log
 /.os_install/
 /.os_tmp/
+/.os_bak/
+/.os_journal
+/.os_journal.done
+/.os_recover.lua
 /os-stable/
 /.mineboom_source
 /.mineboom_manifest

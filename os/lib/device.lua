@@ -19,6 +19,7 @@ local function validate(value)
 end
 
 function Device.load()
+    FsUtil.repair(Device.PATH)
     if not fs.exists(Device.PATH) then
         if fs.exists(Device.PATH .. ".bak") or fs.exists(Device.PATH .. ".tmp") then
             return nil, "Device settings write was interrupted"

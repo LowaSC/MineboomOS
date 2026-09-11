@@ -1,9 +1,5 @@
--- MineboomOS bootstrap. Загружает manifest + конфиг компьютеров,
--- регистрирует машину в реестре и запускает роль.
-local Loader   = dofile("/os/lib/loader.lua")
-local manifest = Loader.require("/os/manifest.lua")
-local Registry = Loader.require("/os/lib/registry.lua")
-local Device = Loader.require("/os/lib/device.lua")
+-- MineboomOS bootstrap. Докатывает незавершённое обновление, загружает
+-- manifest + конфиг компьютеров, регистрирует машину в реестре и запускает роль.
 
 local function panic(message, hint)
     term.setBackgroundColor(colors.black)
@@ -29,6 +25,53 @@ local function panic(message, hint)
         end
     end
 end
+
+-- Незавершённое обновление: /os может быть смесью двух версий, поэтому до
+-- загрузки любой библиотеки докатываем или откатываем его копией библиотеки
+-- транзакций, которую обновление оставило вне /os. Обычно это уже сделал
+-- startup.lua; здесь страховка для машин со старым startup.lua.
+local function recoverInterruptedUpdate()
+    local journal, recover = "/.os_journal", "/.os_recover.lua"
+    if not (fs.exists(journal) or fs.exists(journal .. ".done")) then
+        -- Копия без журнала: обновление оборвалось до его записи, /os не трогали.
+        if fs.exists(recover) then pcall(fs.delete, recover) end
+        return true
+    end
+    if not fs.exists(recover) then
+        return false, "Update journal found but /.os_recover.lua is missing"
+    end
+    term.setTextColor(colors.yellow)
+    print("Finishing interrupted OS update...")
+    local ok, done, outcome, why = pcall(function() return dofile(recover).recover() end)
+    if not ok then return false, tostring(done) end
+    if not done then return false, tostring(outcome) end
+    print("Recovery: " .. tostring(outcome) .. (why and (" (" .. tostring(why) .. ")") or ""))
+    term.setTextColor(colors.white)
+    return true
+end
+
+local recovered, recoverErr = recoverInterruptedUpdate()
+if not recovered then
+    panic(recoverErr, "Reinstall with /os/install.lua, or run dofile('/.os_recover.lua').recover() from a shell.")
+    return
+end
+
+-- Библиотеки загружаем под pcall: битый файл ядра должен показать panic с
+-- подсказкой, а не голую трассировку CraftOS.
+local Loader, manifest, Registry, Device
+local okLibs, libErr = pcall(function()
+    Loader   = dofile("/os/lib/loader.lua")
+    manifest = Loader.require("/os/manifest.lua")
+    Registry = Loader.require("/os/lib/registry.lua")
+    Device   = Loader.require("/os/lib/device.lua")
+end)
+if not okLibs then
+    panic(libErr, "Core library failed to load. Reinstall with /os/install.lua.")
+    return
+end
+
+-- startup.lua не входит в манифест: обновляем его здесь, если он устарел.
+pcall(function() dofile("/os/lib/ostx.lua").ensureStartup() end)
 
 -- Safe mode: если в первые 1.5 секунды нажата Ctrl, запускаем shell вместо роли.
 -- Это страховка от полностью сломанной ОС.
