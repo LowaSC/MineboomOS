@@ -16,7 +16,7 @@ local CHANNELS = {
     -- Enable after the first portable stable release is published:
     -- {name = "stable", url = "https://raw.githubusercontent.com/LowaSC/MineboomOS/stable/os", note = "tested release"},
     {name = "stable", note = "not published yet", disabled = true},
-    {name = "dev", url = "https://raw.githubusercontent.com/LowaSC/MineboomOS/dev/os", note = "current development"},
+    {name = "dev", url = "https://raw.githubusercontent.com/LowaSC/MineboomOS/main/os", note = "current development"},
 }
 
 local args        = {...}

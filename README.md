@@ -14,14 +14,14 @@ Minecraft 1.21.1, NeoForge and CC:Tweaked 1.120.2.
 
 ## Alpha installation
 
-The `dev` branch contains the current experimental build. There is no portable
-stable channel yet.
+The `main` branch contains the current experimental build and is what the
+`dev` update channel points to. There is no portable stable channel yet.
 
 MineboomOS 1.0.6 Obsidian remains the stable release for the maintainer's
 existing world. It is not exported here as a portable `stable` branch because
 it predates standalone profiles and contains assumptions about that world's
-registry and service IDs. The first portable stable branch will be promoted
-after dev.45 passes the in-game checklist.
+registry and service IDs. The first portable `stable` branch will be created
+from `main` after dev.45 passes the in-game checklist.
 
 On a disposable CC:Tweaked computer, run:
 
@@ -62,9 +62,9 @@ Minecraft. Run `luac -p` on every changed Lua file before committing.
 
 Development flow:
 
-1. Work and test on `dev`.
+1. Work and test on `main`; the `dev` update channel follows it.
 2. Update `os/changelog.lua` and `os/manifest.lua`.
 3. Validate installation and OTA updates in Minecraft.
-4. Promote the tested commit to `stable`.
+4. Promote the tested commit from `main` to `stable`.
 
 The in-game validation checklist is maintained in the private server workspace.
