@@ -124,7 +124,7 @@ return {
     -- appStore is a repository path, not the Rednet ID of a trusted server.
     distribution = {
         channels = {
-            dev = "https://raw.githubusercontent.com/LowaSC/MineboomOS/dev/os",
+            dev = "https://raw.githubusercontent.com/LowaSC/MineboomOS/main/os",
             -- stable = "https://raw.githubusercontent.com/LowaSC/MineboomOS/stable/os",
         },
         -- User applications are distributed independently from the OS.
