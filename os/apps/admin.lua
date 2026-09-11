@@ -293,6 +293,7 @@ end
 local function hitList(st, x, y, W, H)
     -- Кнопка New
     if y == 1 and x >= W - 4 then return "new" end
+    if y <= HDR_H then return nil end
 
     -- Кнопки сдвинуты влево на 1 колонку — правый край занят scrollbar.
     local lw = W - 1
@@ -759,7 +760,9 @@ function M.onEvent(st, event, p1, p2, p3)
     -- Ответ App Store с полным каталогом приложений.
     if event == "rednet_message" then
         local msg = p2
-        if type(msg) == "table" and msg.type == "store_index" then
+        if type(msg) == "table" and msg.type == "store_index"
+           and st.storeComputer ~= nil and p1 == st.storeComputer
+           and p3 == st.storeProtocol then
             st.catalog = msg.apps or {}
             if st.mode == "perms" then
                 st.allApps = mergeCatalog(st.allApps, st.catalog)

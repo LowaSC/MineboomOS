@@ -11,6 +11,7 @@ Log.MAX_BYTES     = 32768                  -- ~32 KB на файл, дальше
 Log.MAX_LINES     = 200                    -- сколько последних строк держим в памяти
 
 local _buffer  = {}                        -- кольцевой буфер последних записей
+local _loadedFromDisk = false              -- loadFromDisk выполняется один раз
 local _listeners = {}                      -- подписчики на новые записи
 
 local LEVEL_RANK = {debug = 0, info = 1, warn = 2, error = 3}
@@ -69,7 +70,7 @@ function Log.write(level, message, source)
     local line = string.format("%s [%s]%s %s",
         fmtTime(entry.ts),
         string.upper(level),
-        source and (" " .. source) or "",
+        source and (" [" .. tostring(source) .. "]") or "",
         entry.message)
 
     appendLine(line)
@@ -120,9 +121,20 @@ local function parseLogLine(line)
     local lvl = string.lower(level)
     if LEVEL_RANK[lvl] == nil then lvl = "info" end
     rest = rest or ""
-    local source, message = string.match(rest, "^(%S+)%s+(.*)$")
+    -- Новый формат: источник в квадратных скобках. Без них вся строка —
+    -- сообщение (иначе первое слово сообщения принималось бы за источник).
+    local source, message = string.match(rest, "^%[([^%]]*)%]%s*(.*)$")
     if not source then
-        source, message = nil, rest
+        -- Старый формат (до dev.46): "source message" без скобок. Источники в
+        -- ОС — только строчные идентификаторы (rednet, updater, app_server, id
+        -- приложений), а сообщения без источника начинаются с заглавной буквы,
+        -- поэтому строчное первое слово считаем источником.
+        local legacySource, legacyMessage = string.match(rest, "^([%l%d_%-]+)%s+(%S.*)$")
+        if legacySource then
+            source, message = legacySource, legacyMessage
+        else
+            source, message = nil, rest
+        end
     end
     return {
         raw     = line,
@@ -136,6 +148,8 @@ Log.parseLogLine = parseLogLine
 
 -- Загружает существующий лог с диска в кольцевой буфер (один раз при старте ОС).
 function Log.loadFromDisk()
+    if _loadedFromDisk then return end
+    _loadedFromDisk = true
     if not fs.exists(Log.LOG_FILE) then return end
     local handle = fs.open(Log.LOG_FILE, "r")
     if not handle then return end
@@ -150,6 +164,7 @@ function Log.loadFromDisk()
     for i = first, #lines do
         table.insert(_buffer, parseLogLine(lines[i]))
     end
+    while #_buffer > Log.MAX_LINES do table.remove(_buffer, 1) end
 end
 
 return Log

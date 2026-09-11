@@ -11,13 +11,14 @@ function HttpFetch.available()
     return type(http) == "table" and type(http.get) == "function"
 end
 
--- CC:Tweaked поддерживает таймаут через http.get(url, headers, binary, timeout).
+-- CC:Tweaked принимает таймаут только в табличной форме:
+-- http.get({url = ..., timeout = ...}); позиционный 4-й аргумент игнорируется.
 function HttpFetch.get(url, timeout)
     if not HttpFetch.available() then return nil, "HTTP API is disabled" end
 
-    local ok, handle, err = pcall(http.get, url, nil, false, timeout or HttpFetch.DEFAULT_TIMEOUT)
+    local ok, handle, err = pcall(http.get, {url = url, timeout = timeout or HttpFetch.DEFAULT_TIMEOUT})
     if not ok then
-        -- Старая версия CC:Tweaked не принимает timeout — повторяем без него.
+        -- Старая версия CC:Tweaked не принимает табличную форму — повторяем без неё.
         ok, handle, err = pcall(http.get, url)
         if not ok then return nil, "http.get crashed: " .. tostring(handle) end
     end

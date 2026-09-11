@@ -136,7 +136,8 @@ end
 local function normalizeCatalog(catalog)
     local out = {}
     for _, entry in ipairs(catalog or {}) do
-        if type(entry) == "table" and type(entry.id) == "string" then
+        if type(entry) == "table" and type(entry.id) == "string"
+           and string.match(entry.id, "^[%w_%-]+$") then
             table.insert(out, entry)
         end
     end

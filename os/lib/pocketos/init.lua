@@ -19,6 +19,12 @@ pcall(Log.loadFromDisk)
 
 local PocketOS = {}
 
+-- События, которые считаются активностью пользователя для автоблокировки.
+local USER_INPUT_EVENTS = {
+    mouse_click = true, mouse_up = true, mouse_drag = true, mouse_scroll = true,
+    monitor_touch = true, key = true, key_up = true, char = true, paste = true,
+}
+
 local function tryMonitor(mon)
     return type(mon) == "table" and type(mon.getSize) == "function" and mon
 end
@@ -946,9 +952,10 @@ function PocketOS.create(cfg)
                 if p1 == keys.leftShift or p1 == keys.rightShift then shiftHeld = false end
             end
 
-            -- Сбрасываем таймер блокировки при активности (только если залогинен и не заблокирован)
-            if os_screen == "home" or os_screen == "launcher" then
-                if event ~= "timer" then resetLockTimer() end
+            -- Сбрасываем таймер блокировки только на ввод пользователя (не на
+            -- rednet/http/таймеры — иначе на шумной сети экран не блокируется).
+            if (os_screen == "home" or os_screen == "launcher") and USER_INPUT_EVENTS[event] then
+                resetLockTimer()
             end
 
             if event == "mouse_click" or event == "monitor_touch" then

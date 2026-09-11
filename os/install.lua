@@ -36,7 +36,8 @@ local function fetch(url)
         return nil, "HTTP API is disabled"
     end
 
-    local ok, handle, err = pcall(http.get, url, nil, false, HTTP_TIMEOUT)
+    -- Таймаут CC:Tweaked принимает только в табличной форме запроса.
+    local ok, handle, err = pcall(http.get, {url = url, timeout = HTTP_TIMEOUT})
     if not ok then
         ok, handle, err = pcall(http.get, url)
         if not ok then return nil, "http.get crashed: " .. tostring(handle) end
