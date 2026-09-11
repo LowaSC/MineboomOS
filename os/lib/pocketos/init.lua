@@ -44,6 +44,7 @@ function PocketOS.create(cfg)
     -- Определяем сессию и пользователя ДО загрузки desktop (путь зависит от юзера).
     local currentUser  = nil
     local loginState   = nil
+    local lockState    = LockScreen.initialState()
     do
         local session = Users.getSession()
         local allUsers = Users.list()
@@ -301,6 +302,7 @@ function PocketOS.create(cfg)
         users        = Users,
         lockDevice   = function()
             os_screen = "locked"
+            lockState = LockScreen.initialState()
             if lockTimer then os.cancelTimer(lockTimer) end
             lockTimer = nil
         end,
@@ -311,6 +313,7 @@ function PocketOS.create(cfg)
 
     local function lockDevice()
         os_screen = "locked"
+        lockState = LockScreen.initialState()
         if lockTimer then os.cancelTimer(lockTimer) end
         lockTimer = nil
     end
@@ -414,7 +417,8 @@ function PocketOS.create(cfg)
         end
         if os_screen == "locked" then
             if taskbarWin.setVisible then taskbarWin.setVisible(false) end
-            LockScreen.render(screen, W, H, currentUser, Clock.optsFromDesktop(desktop), Users.getNetworkStatus())
+            LockScreen.render(screen, W, H, currentUser, Clock.optsFromDesktop(desktop),
+                Users.getNetworkStatus(), lockState, Shell.getTheme(desktop.themeIndex))
             return
         end
         if taskbarWin.setVisible then taskbarWin.setVisible(true) end
@@ -787,22 +791,43 @@ function PocketOS.create(cfg)
         loginState  = Login.initialState(Users.list(), nil, Users.getLastUser())
     end
 
-    local function unlockDevice()
-        local session = Users.getSession()
-        if currentUser and session and session.userId == currentUser.id then
-            os_screen = "home"
-            resetLockTimer()
-            return
+    -- Разблокировка: PIN текущего пользователя возвращает рабочий стол с теми
+    -- же открытыми приложениями. Logout или исчерпанные попытки закрывают
+    -- сессию и уводят на экран входа.
+    local function handleLockAction(action, data)
+        if not action then return false end
+        if not currentUser then
+            doLogout()
+            return true
         end
-
-        closeAllApps()
-        currentUser     = nil
-        ctx.currentUser = nil
-        ctx.dataRoot    = "/data"
-        reloadDesktop(nil)
-        if lockTimer then os.cancelTimer(lockTimer); lockTimer = nil end
-        os_screen  = "login"
-        loginState = Login.initialState(Users.list(), session, Users.getLastUser())
+        if action == "digit" then
+            if #lockState.pin < 32 then lockState.pin = lockState.pin .. tostring(data) end
+            lockState.error = ""
+        elseif action == "backspace" then
+            lockState.pin = string.sub(lockState.pin, 1, -2)
+        elseif action == "logout" then
+            doLogout()
+        elseif action == "ok" then
+            if Users.authenticate(currentUser.id, lockState.pin) then
+                os_screen = "home"
+                lockState = LockScreen.initialState()
+                Sound.login(vol())
+                resetLockTimer()
+            else
+                lockState.pin      = ""
+                lockState.attempts = lockState.attempts + 1
+                Sound.error(vol())
+                if lockState.attempts >= LockScreen.MAX_ATTEMPTS then
+                    doLogout()
+                    loginState.error = "Too many attempts"
+                else
+                    lockState.error = "Wrong PIN (" .. lockState.attempts .. "/" .. LockScreen.MAX_ATTEMPTS .. ")"
+                end
+            end
+        else
+            return false
+        end
+        return true
     end
 
     local function handleLoginAction(action, data)
@@ -969,11 +994,8 @@ function PocketOS.create(cfg)
 
                 -- Экран блокировки
                 elseif os_screen == "locked" then
-                    local action = LockScreen.hit(mx, my, W, H)
-                    if action == "unlock" then
-                        unlockDevice()
-                    end
-                    needsDraw = true
+                    local action, data = LockScreen.hit(mx, my, W, H)
+                    needsDraw = handleLockAction(action, data) or needsDraw
 
                 elseif my == H then
                     needsDraw = handleTaskbarClick(btn, mx) or needsDraw
@@ -1035,7 +1057,11 @@ function PocketOS.create(cfg)
             elseif event == "key" then
                 -- Escape: закрывает модал/launcher глобально.
                 if os_screen == "locked" then
-                    -- Lock screen is dismissed by pointer/touch only.
+                    if isEnterKey(p1) then
+                        needsDraw = handleLockAction("ok") or needsDraw
+                    elseif p1 == keys.backspace then
+                        needsDraw = handleLockAction("backspace") or needsDraw
+                    end
                 elseif os_screen == "login" then
                     if isEnterKey(p1) then
                         needsDraw = handleLoginAction("ok") or needsDraw
@@ -1065,7 +1091,9 @@ function PocketOS.create(cfg)
 
             elseif event == "char" then
                 if os_screen == "locked" then
-                    -- Ignore keyboard text input while locked.
+                    if isDigitChar(p1) then
+                        needsDraw = handleLockAction("digit", p1) or needsDraw
+                    end
                 elseif os_screen == "login" then
                     if isDigitChar(p1) then
                         needsDraw = handleLoginAction("digit", p1) or needsDraw

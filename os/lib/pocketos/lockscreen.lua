@@ -1,7 +1,18 @@
--- Экран блокировки / скринсейвер.
+-- Экран блокировки. Показывает часы и имя пользователя, но рабочий стол
+-- возвращает только после ввода PIN этого пользователя: запущенные приложения
+-- при этом сохраняются. Кнопка Logout (или исчерпанные попытки) закрывает
+-- сессию и уводит на экран входа.
 local Clock = dofile("/os/lib/clock.lua")
+local Login = dofile("/os/lib/pocketos/login.lua")
 
 local LockScreen = {}
+LockScreen.MAX_ATTEMPTS = 5
+LockScreen.LOGOUT_LABEL = "[Logout]"
+
+-- Состояние ввода. Создаётся при каждой блокировке.
+function LockScreen.initialState()
+    return {pin = "", error = "", attempts = 0}
+end
 
 -- opts: Clock.optsFromDesktop(desktop) — режим/смещение времени.
 local function getTimeStr(opts)
@@ -17,61 +28,81 @@ local function getDateStr(opts)
     return (Clock.DAYS[c.wday] or "") .. " " .. tostring(c.day) .. " " .. (Clock.MONTHS[c.mon] or "")
 end
 
-function LockScreen.render(screen, W, AH, currentUser, clockOpts, networkStatus)
+-- Раскладка сверху вниз: часы, дата, имя, PIN, клавиатура, статус, Logout.
+-- На карманном компьютере (26x20) занимает весь экран, на мониторах
+-- центрируется по вертикали.
+local function geom(W, AH)
+    local total = 18
+    local top = math.max(1, math.floor((AH - total) / 2) + 1)
+    return {
+        clockY  = top,
+        dateY   = top + 1,
+        nameY   = top + 3,
+        pinY    = top + 4,
+        kpadX   = math.floor((W - Login.KEYPAD_W) / 2) + 1,
+        kpadY   = top + 6,
+        statusY = top + 6 + Login.KEYPAD_H + 1,
+        logoutY = top + 6 + Login.KEYPAD_H + 3,
+        logoutX = math.floor((W - #LockScreen.LOGOUT_LABEL) / 2) + 1,
+    }
+end
+
+local function centered(screen, W, y, text, fg)
+    screen.setCursorPos(math.floor((W - #text) / 2) + 1, y)
+    screen.setTextColor(fg)
+    screen.write(text)
+end
+
+function LockScreen.render(screen, W, AH, currentUser, clockOpts, networkStatus, state, theme)
+    state = state or LockScreen.initialState()
     screen.setBackgroundColor(colors.black)
     screen.clear()
 
-    local cx = math.floor(W / 2)
-    local cy = math.floor(AH / 2)
+    local g = geom(W, AH)
 
-    -- Большие часы
+    -- Часы вразрядку, чтобы читались издалека
     local timeStr = getTimeStr(clockOpts)
-    screen.setCursorPos(cx - math.floor(#timeStr * 2), cy - 2)
-    screen.setBackgroundColor(colors.black)
-    screen.setTextColor(colors.white)
-    -- Крупный шрифт — просто пишем с пробелами между символами
     local big = ""
-    for i = 1, #timeStr do
-        big = big .. string.sub(timeStr, i, i) .. " "
-    end
-    big = string.sub(big, 1, -2)
-    screen.setCursorPos(math.floor((W - #big) / 2) + 1, cy - 2)
-    screen.write(big)
+    for i = 1, #timeStr do big = big .. string.sub(timeStr, i, i) .. " " end
+    centered(screen, W, g.clockY, string.sub(big, 1, -2), colors.white)
 
-    -- Дата
     local dateStr = getDateStr(clockOpts)
-    if dateStr ~= "" then
-        screen.setCursorPos(math.floor((W - #dateStr) / 2) + 1, cy)
-        screen.setTextColor(colors.lightGray)
-        screen.write(dateStr)
+    if dateStr ~= "" then centered(screen, W, g.dateY, dateStr, colors.lightGray) end
+
+    local name = currentUser and currentUser.name or "Unknown"
+    centered(screen, W, g.nameY, string.sub(name, 1, W), colors.white)
+
+    local dots = string.rep("*", math.min(#state.pin, W - 5))
+    centered(screen, W, g.pinY, "PIN: " .. dots, #state.pin > 0 and colors.white or colors.gray)
+
+    Login.drawKeypad(screen, g.kpadX, g.kpadY, theme)
+    screen.setBackgroundColor(colors.black)
+
+    if state.error and state.error ~= "" then
+        centered(screen, W, g.statusY, string.sub(state.error, 1, W), colors.red)
+    elseif networkStatus and networkStatus.remote and not networkStatus.online then
+        centered(screen, W, g.statusY, string.sub("Offline mode", 1, W), colors.orange or colors.yellow)
+    else
+        centered(screen, W, g.statusY, "Enter PIN to unlock", colors.gray)
     end
 
-    -- Имя пользователя
-    local name = currentUser and currentUser.name or "Unknown"
-    screen.setCursorPos(math.floor((W - #name) / 2) + 1, cy + 2)
-    screen.setTextColor(colors.white)
-    screen.write(name)
-
-    -- Подсказка
-    local hint = "[ tap to unlock ]"
-    screen.setCursorPos(math.floor((W - #hint) / 2) + 1, cy + 4)
-    screen.setTextColor(colors.gray)
-    screen.write(hint)
-
-    if networkStatus and networkStatus.remote and not networkStatus.online then
-        local msg = "Offline mode - network unavailable"
-        if networkStatus.detail and networkStatus.detail ~= "" then
-            msg = msg .. ": " .. tostring(networkStatus.detail)
-        end
-        msg = string.sub(msg, 1, W)
-        screen.setCursorPos(math.floor((W - #msg) / 2) + 1, AH)
-        screen.setTextColor(colors.orange or colors.yellow)
-        screen.write(msg)
+    if g.logoutY <= AH then
+        screen.setCursorPos(g.logoutX, g.logoutY)
+        screen.setBackgroundColor(colors.gray)
+        screen.setTextColor(colors.white)
+        screen.write(LockScreen.LOGOUT_LABEL)
+        screen.setBackgroundColor(colors.black)
     end
 end
 
+-- Hit-тест: ("digit", n) / "backspace" / "ok" / "logout" / nil.
+-- Касание мимо кнопок ничего не делает: экран больше не снимается тапом.
 function LockScreen.hit(x, y, W, AH)
-    return "unlock"
+    local g = geom(W, AH)
+    if y == g.logoutY and x >= g.logoutX and x < g.logoutX + #LockScreen.LOGOUT_LABEL then
+        return "logout"
+    end
+    return Login.keypadHit(x, y, g.kpadX, g.kpadY)
 end
 
 return LockScreen
